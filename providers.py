@@ -54,25 +54,44 @@ PROVIDERS = [
 ]
 
 
+def _make_client(p):
+    return OpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=120.0)
+
+
 def chat_completion(messages, tools=None, temperature=0.3, retries_per_provider=1):
     """依次尝试每个供应商，返回第一个成功的响应；全部失败则抛异常。"""
     errors = []
     for p in PROVIDERS:
-        if not p["api_key"]:
-            errors.append(f"{p['name']}: 未配置 API Key，跳过")
-            continue
-        if not p["model"]:
-            errors.append(f"{p['name']}: 未配置 model，跳过")
+        if not p["api_key"] or not p["model"]:
+            errors.append(f"{p['name']}: 未配置，跳过")
             continue
         for attempt in range(retries_per_provider + 1):
             try:
-                client = OpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=60.0)
+                client = _make_client(p)
                 kwargs = {"model": p["model"], "messages": messages, "temperature": temperature}
                 if tools:
                     kwargs["tools"] = tools
                 resp = client.chat.completions.create(**kwargs)
-                resp._provider_name = p["name"]  # 标记实际使用的供应商
+                resp._provider_name = p["name"]
                 return resp
             except Exception as e:  # noqa: BLE001
                 errors.append(f"{p['name']}(第{attempt + 1}次): {type(e).__name__}: {e}")
     raise RuntimeError("所有供应商均调用失败：\n" + "\n".join(errors))
+
+
+def stream_completion(messages, tools=None, temperature=0.3):
+    """流式调用，返回 (stream_iterator, provider_name)。用于最终回答的逐字输出。"""
+    errors = []
+    for p in PROVIDERS:
+        if not p["api_key"] or not p["model"]:
+            continue
+        try:
+            client = _make_client(p)
+            kwargs = {"model": p["model"], "messages": messages, "temperature": temperature}
+            if tools:
+                kwargs["tools"] = tools
+            stream = client.chat.completions.create(**kwargs, stream=True)
+            return stream, p["name"]
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{p['name']}: {type(e).__name__}: {e}")
+    raise RuntimeError("所有供应商流式调用失败：\n" + "\n".join(errors))

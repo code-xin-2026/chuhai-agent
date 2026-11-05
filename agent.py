@@ -1,7 +1,7 @@
-"""ReAct 智能体循环：大模型 + 工具调用（function calling）。"""
+"""ReAct 智能体循环：大模型 + 工具调用（function calling）+ 流式输出。"""
 import json
 
-from providers import chat_completion
+from providers import chat_completion, stream_completion
 from tools import TOOLS, dispatch_tool
 
 SYSTEM_PROMPT = """你是「跨境出海合规与成本测算助手」，帮中小卖家评估把产品出口到海外目标国的合规要求与到岸成本。
@@ -24,52 +24,101 @@ SYSTEM_PROMPT = """你是「跨境出海合规与成本测算助手」，帮中�
 - 关税要如实说明「分层构成 + 来源 + 更新时间」，并提示「以海关实时税率为准」；金额为估算值的要注明。
 - 问到数据范围之外的国家/产品，如实说明「当前仅覆盖美国·儿童声光电动早教玩具」。"""
 
+MAX_HISTORY_MESSAGES = 20  # 上下文裁剪：只保留最近 N 条，防止对话过长变慢变贵
 
-def run_agent(user_message: str, history: list, max_steps: int = 8):
-    """执行一次对话。history 为之前的 user/assistant 消息列表（不含本次）。"""
+
+def _build_messages(user_message, history):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages += [{"role": m["role"], "content": m["content"]} for m in history]
+    recent = history[-MAX_HISTORY_MESSAGES:]
+    messages += [{"role": m["role"], "content": m["content"]} for m in recent]
     messages.append({"role": "user", "content": user_message})
+    return messages
 
+
+def _tool_calls_message(msg):
+    return {
+        "role": "assistant",
+        "content": msg.content,
+        "tool_calls": [
+            {"id": tc.id, "type": "function",
+             "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+            for tc in msg.tool_calls
+        ],
+    }
+
+
+def _safe_args(tc):
+    try:
+        return json.loads(tc.function.arguments or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+
+def _usage_of(resp):
+    try:
+        u = resp.usage
+        return {"prompt": u.prompt_tokens, "completion": u.completion_tokens, "total": u.total_tokens}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def stream_agent(user_message, history, max_steps=8):
+    """流式智能体。产出事件：
+    {"type":"tool", step, provider, tool, args, result}   # 工具执行（实时状态）
+    {"type":"text", text}                                  # 最终回答增量（流式）
+    {"type":"done", answer, trace, provider, usage}        # 结束
+    """
+    messages = _build_messages(user_message, history)
     trace = []
+    provider = "?"
     for _ in range(max_steps):
         resp = chat_completion(messages, tools=TOOLS)
         msg = resp.choices[0].message
         provider = getattr(resp, "_provider_name", "?")
+        usage = _usage_of(resp)
 
         if msg.tool_calls:
-            messages.append({
-                "role": "assistant",
-                "content": msg.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                    }
-                    for tc in msg.tool_calls
-                ],
-            })
+            messages.append(_tool_calls_message(msg))
             for tc in msg.tool_calls:
-                name = tc.function.name
-                try:
-                    args = json.loads(tc.function.arguments or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                result = dispatch_tool(name, args)
-                trace.append({
-                    "step": len(trace) + 1,
-                    "provider": provider,
-                    "tool": name,
-                    "args": args,
-                    "result": result,
-                })
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": json.dumps(result, ensure_ascii=False),
-                })
+                args = _safe_args(tc)
+                result = dispatch_tool(tc.function.name, args)
+                step = {"step": len(trace) + 1, "provider": provider,
+                        "tool": tc.function.name, "args": args, "result": result}
+                trace.append(step)
+                yield {"type": "tool", **step}
+                messages.append({"role": "tool", "tool_call_id": tc.id,
+                                 "content": json.dumps(result, ensure_ascii=False)})
         else:
-            return (msg.content or ""), trace
+            # 最终回答：重新以流式请求产出（不带 tools，确保只返回文本）
+            full = []
+            sp = provider
+            try:
+                stream, sp = stream_completion(messages, tools=None)
+                for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        full.append(delta.content)
+                        yield {"type": "text", "text": delta.content}
+            except Exception:  # noqa: BLE001
+                fallback = msg.content or "（生成失败，请重试）"
+                full = [fallback]
+                yield {"type": "text", "text": fallback}
+            yield {"type": "done", "answer": "".join(full), "trace": trace,
+                   "provider": sp, "usage": usage}
+            return
 
-    return "（已达到最大推理步数，为安全起见停止。请稍后重试或换种问法。）", trace
+    yield {"type": "text", "text": "（已达到最大推理步数，为安全起见停止。请稍后重试或换种问法。）"}
+    yield {"type": "done", "answer": "（已达到最大推理步数）", "trace": trace,
+           "provider": provider, "usage": None}
+
+
+def run_agent(user_message, history, max_steps=8):
+    """非流式包装（用于测试/兜底），返回 (answer, trace)。"""
+    parts = []
+    trace = []
+    for ev in stream_agent(user_message, history, max_steps):
+        if ev["type"] == "text":
+            parts.append(ev["text"])
+        elif ev["type"] == "tool":
+            trace.append({k: ev[k] for k in ("step", "provider", "tool", "args", "result")})
+    return "".join(parts), trace
