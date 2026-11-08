@@ -157,6 +157,72 @@ def check_high_tariff(order, cost_info):
     return []
 
 
+def check_address_type(order):
+    """PO Box 地址：多数快递/专线不收，且常见于货代转口。"""
+    at = (order.get("address_type") or "").strip().lower()
+    if at and ("po" in at or "box" in at):
+        return [{
+            "type": "PO Box 地址",
+            "severity": "🟠 较高",
+            "message": "收货地址为 PO Box，多数快递/专线不收，且无法核实实际收件人",
+            "suggestion": "确认是否有实体收货地址；PO Box 常见于货代转口，需核实最终收货方",
+        }]
+    return []
+
+
+def check_origin(order):
+    """原产地缺失：影响关税归类与优惠判定。"""
+    if not (order.get("origin") or "").strip():
+        return [{
+            "type": "原产地缺失",
+            "severity": "🟡 中",
+            "message": "订单未填写原产地，影响关税归类与优惠（FTA/附加税）判定",
+            "suggestion": "补录原产地，原产地直接决定适用税率",
+        }]
+    return []
+
+
+def check_cert_status(order):
+    """认证状态缺失：品类强制认证可能未完成。"""
+    cs = (order.get("cert_status") or "").strip()
+    if cs and any(k in cs for k in ("缺失", "未提供", "未申请", "未确认", "待确认")):
+        return [{
+            "type": "认证缺失",
+            "severity": "🟠 较高",
+            "message": f"认证状态为「{cs}」，该品类强制认证可能缺失",
+            "suggestion": "核对品类强制认证清单，补齐后再发货",
+        }]
+    return []
+
+
+def check_notes(order):
+    """备注陷阱：转口贸易 / 危险品漏报 / 收货方不明。"""
+    notes = (order.get("notes") or "").lower()
+    issues = []
+    if any(k in notes for k in ("转口", "forward", "reship", "drop ship", "dropship", "transship", "third party", "第三方", "转运")):
+        issues.append({
+            "type": "疑似转口贸易",
+            "severity": "🟠 较高",
+            "message": "备注提示货代/转口/第三方转运，最终目的地可能非申报国",
+            "suggestion": "核实最终收货方与实际目的地，转口有合规与制裁风险",
+        })
+    if any(k in notes for k in ("易燃", "液体", "flammable", "liquid")):
+        issues.append({
+            "type": "危险品申报风险",
+            "severity": "🔴 高",
+            "message": "备注提示液体/易燃风险，但可能按普货申报",
+            "suggestion": "核对是否危险品，按危险品申报与运输，否则有拒收/罚款风险",
+        })
+    if any(k in notes for k in ("consignee unknown", "收货方不明", "未知收货")):
+        issues.append({
+            "type": "收货方不明",
+            "severity": "🟡 中",
+            "message": "备注提示收货方不明/无法核实",
+            "suggestion": "核实实际收货方身份",
+        })
+    return issues
+
+
 def detect_all(order, cost_info=None):
     """跑全部规则，返回该订单的异常列表。"""
     issues = []
@@ -167,4 +233,8 @@ def detect_all(order, cost_info=None):
     issues += check_lithium(order)
     issues += check_underpriced(order)
     issues += check_high_tariff(order, cost_info)
+    issues += check_address_type(order)
+    issues += check_origin(order)
+    issues += check_cert_status(order)
+    issues += check_notes(order)
     return issues

@@ -10,6 +10,7 @@ import os
 STANDARD_FIELDS = [
     "order_id", "buyer_name", "product", "category", "quantity", "unit_value_usd",
     "country", "city", "state", "postal_code", "has_lithium", "mode",
+    "notes", "address_type", "origin", "cert_status",
 ]
 
 # 别名映射：同义词 → 标准字段
@@ -26,6 +27,10 @@ ALIASES = {
     "postal_code": ["邮编", "邮政编码", "zip", "postcode", "postal_code", "zipcode", "postalcode", "邮编/邮政编码"],
     "has_lithium": ["是否含锂电池", "含锂电池", "是否含锂", "锂电池", "haslithium", "has_lithium", "battery", "是否带电", "带电", "是否含电池"],
     "mode": ["物流方式", "运输方式", "走货方式", "mode", "shipping", "物流", "shipmode", "ship_mode", "发货方式"],
+    "notes": ["备注", "说明", "备注说明", "notes", "remark", "remarks", "comment", "订单备注"],
+    "address_type": ["地址类型", "地址性质", "address_type", "addresstype", "收件地址类型"],
+    "origin": ["原产地", "产地", "origin", "原产国", "生产国"],
+    "cert_status": ["认证状态", "认证情况", "cert_status", "certstatus", "认证"],
 }
 
 

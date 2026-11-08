@@ -15,11 +15,22 @@ HMF_RATE = 0.00125           # 港口维护费 0.125%（海运）
 # —— 物流/杂项（估算值，正式版接实时报价）——
 FREIGHT_SEA_USD_PER_KG = 4.0
 FREIGHT_AIR_USD_PER_KG = 10.0
+FREIGHT_LAND_USD_PER_KG = 3.5
 DANGEROUS_SURCHARGE_USD_PER_KG = 1.5
 FBA_PREP_USD_PER_UNIT = 0.5
 RISK_RESERVE_PCT_SMALL = 0.05
 RISK_RESERVE_PCT_LARGE = 0.02
 UNIT_WEIGHT_KG = 0.3
+
+
+def _freight_rate(mode):
+    """按运输方式解析运费单价：空运/海运/陆运/小包。"""
+    m = (mode or "").strip()
+    if any(k in m for k in ("空运", "air", "直邮", "小包", "快递", "express", "parcel", "专线")):
+        return FREIGHT_AIR_USD_PER_KG
+    if any(k in m for k in ("陆运", "land", "公路", "铁路")):
+        return FREIGHT_LAND_USD_PER_KG
+    return FREIGHT_SEA_USD_PER_KG
 
 
 def estimate_landed_cost(destination: str, product: str, unit_value_usd: float,
@@ -51,7 +62,7 @@ def estimate_landed_cost(destination: str, product: str, unit_value_usd: float,
     hmf = total_value * HMF_RATE
 
     weight_kg = max(qty * UNIT_WEIGHT_KG, 1.0)
-    freight_rate = FREIGHT_AIR_USD_PER_KG if mode == "直邮小包" else FREIGHT_SEA_USD_PER_KG
+    freight_rate = _freight_rate(mode)
     freight = weight_kg * freight_rate
     dangerous_surcharge = weight_kg * DANGEROUS_SURCHARGE_USD_PER_KG if has_lithium_battery else 0.0
     fba_prep = qty * FBA_PREP_USD_PER_UNIT if mode == "FBA大批量" else 0.0
