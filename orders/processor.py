@@ -30,17 +30,19 @@ def process_orders(orders):
     results = []
     for o in orders:
         country = norm_country(o.get("country"))
-        product = o.get("product") or o.get("category") or ""
+        category = o.get("category") or ""
+        product = o.get("product") or ""
+        match_key = f"{category} {product}".strip() or "未填"
         unit_value = o.get("unit_value_usd") or 0
         qty = o.get("quantity") or 0
         has_li = bool(o.get("has_lithium"))
         mode = _map_mode(o.get("mode"))
 
-        comp = compliance.check_compliance(country, product)
-        tariff = tariff_db.query_tariff(product, country)
+        comp = compliance.check_compliance(country, match_key)
+        tariff = tariff_db.query_tariff(match_key, country)
         try:
             cost_info = estimate_landed_cost(
-                destination=country, product=product, unit_value_usd=unit_value,
+                destination=country, product=match_key, unit_value_usd=unit_value,
                 quantity=qty, mode=mode, has_lithium_battery=has_li)
         except Exception:
             cost_info = None
