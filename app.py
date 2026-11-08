@@ -49,6 +49,16 @@ EXAMPLES = [
     "换电池供应商需要重新做哪些认证？",
 ]
 
+WELCOME_MESSAGE = (
+    "您好，我是「帆朵」🚢，一名跨境出海合规与成本测算助手。\n\n"
+    "我能帮中小卖家/创业者解决这些问题：\n"
+    "- 📋 **认证准入**：产品出口到美国/印度/俄罗斯需要什么认证（CPC/FCC/FDA/BIS/EAC 等），带法规编号和跳过后果；\n"
+    "- 💰 **关税与到岸成本**：分层税率 + 到岸成本测算，带来源和更新时间；\n"
+    "- ⚠️ **风险识别**：制裁、危险品、低报等风险提醒；\n"
+    "- 📦 **订单自动处理**：到侧边栏「订单处理」页上传订单表，我自动跑合规 + 成本 + 异常检测。\n\n"
+    "您可以直接提问，或上传产品图片让我识别分析。"
+)
+
 
 def copy_button(text: str):
     """复制按钮：json 序列化 + HTML 实体转义，避免引号/尖括号破坏 HTML 属性。"""
@@ -83,7 +93,7 @@ with st.sidebar:
 
 # —— 主区域 ——
 st.title("🚢 帆朵 · 跨境出海助手")
-st.caption("合规成本测算 + 外贸客服 · 当前数据范围：美国 · 儿童声光电动早教玩具")
+st.caption("合规成本测算 + 外贸客服 + 订单自动处理 · 覆盖：美国 / 印度 / 俄罗斯")
 
 messages = chat_store.get_conversation(st.session_state.current_id) if st.session_state.current_id else []
 
@@ -94,6 +104,8 @@ for m in messages:
 # —— 预设示例（仅空会话时显示） ——
 clicked = None
 if not messages:
+    with st.chat_message("assistant"):
+        st.markdown(WELCOME_MESSAGE)
     st.markdown("**💡 试试这些：**")
     cols = st.columns(len(EXAMPLES))
     for i, ex in enumerate(EXAMPLES):
@@ -135,6 +147,7 @@ if msg:
     if st.session_state.current_id is None:
         title = msg[:18] + ("…" if len(msg) > 18 else "")
         st.session_state.current_id = chat_store.create_conversation(title)
+        chat_store.add_message(st.session_state.current_id, "assistant", WELCOME_MESSAGE)
     cid = st.session_state.current_id
     prior = chat_store.get_conversation(cid)  # 本次之前的历史
     chat_store.add_message(cid, "user", msg)

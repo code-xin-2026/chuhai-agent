@@ -8,7 +8,7 @@ import io
 import os
 
 STANDARD_FIELDS = [
-    "order_id", "buyer_name", "product", "quantity", "unit_value_usd",
+    "order_id", "buyer_name", "product", "category", "quantity", "unit_value_usd",
     "country", "city", "state", "postal_code", "has_lithium", "mode",
 ]
 
@@ -16,7 +16,8 @@ STANDARD_FIELDS = [
 ALIASES = {
     "order_id": ["订单号", "订单编号", "orderid", "order_id", "orderno", "order_no", "订单id", "id"],
     "buyer_name": ["买家", "买家名", "buyer", "buyername", "buyer_name", "客户", "客户名", "收件人", "consignee", "name", "收货人"],
-    "product": ["产品", "产品名", "品名", "product", "productname", "product_name", "商品", "goods", "item", "品类", "sku", "sku名称"],
+    "product": ["产品", "产品名", "品名", "商品名称", "商品名", "product", "productname", "product_name", "商品", "goods", "item", "sku", "sku名称"],
+    "category": ["品类", "产品类别", "类别", "类目", "分类", "category", "cat"],
     "quantity": ["数量", "件数", "qty", "quantity", "数量(件)", "数量（件）", "units", "数量(pcs)"],
     "unit_value_usd": ["单价", "单价usd", "单价(usd)", "单价（usd）", "unitprice", "unit_price", "price", "value", "单价(美元)", "申报单价"],
     "country": ["国家", "目的地", "目的地国家", "country", "destination", "目的国", "shipcountry", "ship_country", "国家/地区", "国家地区", "目的国家"],

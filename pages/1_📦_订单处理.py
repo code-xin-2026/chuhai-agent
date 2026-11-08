@@ -104,7 +104,7 @@ if orders is not None:
         with tab2:
             if anomalies:
                 df = pd.DataFrame(anomalies).rename(columns={
-                    "order_id": "订单号", "product": "产品", "country": "目的地",
+                    "order_id": "订单号", "category": "品类", "product": "产品", "country": "目的地",
                     "type": "异常类型", "severity": "严重级", "message": "说明", "suggestion": "建议",
                 })
                 st.dataframe(df, width="stretch", hide_index=True)
@@ -134,6 +134,7 @@ if orders is not None:
                 cost = r["cost"]
                 rows.append({
                     "订单号": o.get("order_id") or "—",
+                    "品类": o.get("category") or "—",
                     "产品": o.get("product") or "—",
                     "目的地": o.get("country") or "未填",
                     "数量": o.get("quantity"),

@@ -33,6 +33,7 @@ def anomaly_report(orders, results):
         for issue in r["anomalies"]:
             rows.append({
                 "order_id": o.get("order_id") or "—",
+                "category": o.get("category") or "—",
                 "product": o.get("product") or "—",
                 "country": o.get("country") or "未填",
                 "type": issue["type"],

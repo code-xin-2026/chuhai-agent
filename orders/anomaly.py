@@ -9,7 +9,7 @@ SANCTION_RISK_COUNTRIES = {"俄罗斯", "russia"}
 SUPPORTED_COUNTRIES = {"美国", "印度", "俄罗斯", "usa", "us", "india", "russia", "america"}
 
 LOWBALL_RATIO = 0.4
-MAX_ORDER_QTY = 50000
+MAX_ORDER_QTY = 10000
 
 
 def check_address(order):
@@ -69,7 +69,7 @@ def check_quantity(order):
     elif qty <= 0:
         issues.append({"type": "数量异常", "severity": "🔴 高", "message": f"数量为 {qty}，不合法", "suggestion": "核对订单，疑似数据录入错误"})
     elif qty > MAX_ORDER_QTY:
-        issues.append({"type": "数量异常", "severity": "🟡 中", "message": f"单笔数量 {qty} 件，异常偏大", "suggestion": "核对是否笔误，大单需单独走大宗贸易流程"})
+        issues.append({"type": "数量异常", "severity": "🟡 中", "message": f"单笔数量 {qty} 件，远超常规阈值（{MAX_ORDER_QTY} 件）", "suggestion": "核对是否笔误，大单需单独走大宗贸易流程并复核买家资信"})
     return issues
 
 

@@ -30,7 +30,7 @@ def process_orders(orders):
     results = []
     for o in orders:
         country = norm_country(o.get("country"))
-        product = o.get("product") or ""
+        product = o.get("product") or o.get("category") or ""
         unit_value = o.get("unit_value_usd") or 0
         qty = o.get("quantity") or 0
         has_li = bool(o.get("has_lithium"))
