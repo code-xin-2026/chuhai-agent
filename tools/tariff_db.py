@@ -4,8 +4,18 @@ import sqlite3
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "tariff.db")
 
-_COLS = ["hs_code", "country", "description", "mfn_pct", "section301_pct",
-         "ieepa_pct", "forced_labor301_pct", "effective_pct", "source", "note", "updated_at"]
+_COLS = ["hs_code", "country", "description", "mfn_pct", "china_surcharge_pct",
+         "effective_pct", "source", "note", "updated_at"]
+
+# 关键词 → HS（产品名命中任一子串即映射；顺序即优先级：玩具类排最前，安全优先）
+_KEYWORD_HS = [
+    ("玩具", "9503.00.00"), ("儿童", "9503.00.00"), ("早教", "9503.00.00"), ("积木", "9503.00.00"),
+    ("不锈钢", "7323.93.00"), ("保温杯", "7323.93.00"), ("水杯", "7323.93.00"),
+    ("餐具", "7323.93.00"), ("厨具", "7323.93.00"), ("食品接触", "7323.93.00"),
+    ("充电宝", "8507.60.00"), ("移动电源", "8507.60.00"), ("电池", "8507.60.00"), ("锂电", "8507.60.00"),
+    ("耳机", "8518.30.00"), ("耳塞", "8518.30.00"),
+    ("音箱", "8518.22.00"), ("音响", "8518.22.00"), ("扬声器", "8518.22.00"),
+]
 
 
 def _ensure_db():
@@ -16,11 +26,17 @@ def _ensure_db():
 
 
 def product_to_hs(product: str):
+    """产品名 → HS 编码：先精确匹配 product_hs_map，再关键词匹配。"""
     _ensure_db()
     conn = sqlite3.connect(DB_PATH)
     row = conn.execute("SELECT hs_code FROM product_hs_map WHERE product = ?", (product,)).fetchone()
     conn.close()
-    return row[0] if row else None
+    if row:
+        return row[0]
+    for kw, hs in _KEYWORD_HS:
+        if kw in product:
+            return hs
+    return None
 
 
 def get_tariff(hs_code: str, country: str):
@@ -38,7 +54,7 @@ def query_tariff(product: str, destination: str = "美国"):
     hs = product_to_hs(product)
     if hs is None:
         return {"product": product, "in_scope": False,
-                "message": "该产品暂无 HS 编码映射（当前仅覆盖：儿童声光电动早教玩具）"}
+                "message": "该产品暂无 HS 编码映射（当前覆盖：玩具/不锈钢食品接触容器/锂电池充电宝/蓝牙耳机音箱）"}
     t = get_tariff(hs, destination)
     if t is None:
         return {"product": product, "hs_code": hs, "destination": destination, "in_scope": False,
@@ -50,10 +66,8 @@ def query_tariff(product: str, destination: str = "美国"):
         "in_scope": True,
         "description": t["description"],
         "rates": {
-            "最惠国MFN": t["mfn_pct"],
-            "存量301(清单1-4A)": t["section301_pct"],
-            "IEEPA(已失效)": t["ieepa_pct"],
-            "新301(强迫劳动)": t["forced_labor301_pct"],
+            "基础关税(稳定)": t["mfn_pct"],
+            "附加税(政策波动)": t["china_surcharge_pct"],
         },
         "effective_pct": t["effective_pct"],
         "source": t["source"],

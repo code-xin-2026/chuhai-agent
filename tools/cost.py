@@ -1,7 +1,7 @@
-"""到岸成本测算（美国 · 儿童声光电动早教玩具）。
+"""到岸成本测算（支持任意产品：税率库真实数据 或 大模型估算税率）。
 
-分项：货值 / 进口关税(实时HS) / MPF / HMF / 物流 / 危险品附加 / FBA预处理 / 认证摊薄 / 风险备用金。
-关税税率从 SQLite 实时查询（分层：MFN/301/IEEPA/新301，带来源）；物流等其余费率为估算值。
+分项：货值 / 进口关税 / MPF / HMF / 物流 / 危险品附加 / FBA预处理 / 认证摊薄 / 风险备用金。
+关税来源分级：① 传入的 tariff_rate_pct（模型估算）> ② SQLite 税率库（真实）。
 """
 from tools import tariff_db
 from tools.compliance import certification_total_cost_usd
@@ -24,19 +24,27 @@ UNIT_WEIGHT_KG = 0.3
 
 def estimate_landed_cost(destination: str, product: str, unit_value_usd: float,
                          quantity: int, mode: str = "FBA大批量",
-                         has_lithium_battery: bool = True):
-    """测算到岸成本。mode: 直邮小包 | FBA大批量。"""
+                         has_lithium_battery: bool = True,
+                         tariff_rate_pct: float = None):
+    """测算到岸成本。tariff_rate_pct 可选：产品不在税率库时由模型估算传入。"""
     qty = int(quantity)
     total_value = float(unit_value_usd) * qty
 
-    # 关税：实时查 HS 分层税率
-    tariff = tariff_db.query_tariff(product, destination)
-    if tariff and tariff.get("in_scope"):
-        effective_pct = tariff["effective_pct"]
-        tariff_note = tariff.get("note", "")
+    # 关税：① 传入的估算税率 > ② 税率库真实数据
+    tariff = None
+    if tariff_rate_pct is not None:
+        effective_pct = float(tariff_rate_pct)
+        tariff_note = "大模型估算的有效税率（需核实，以海关实时为准）"
+        tariff = {"effective_pct": effective_pct, "source": "LLM估算",
+                  "note": tariff_note, "hs_code": None, "rates": None, "updated_at": None}
     else:
-        effective_pct = 0.0
-        tariff_note = "该产品/国家暂无税率数据，关税按 0 估算，需核实"
+        tariff = tariff_db.query_tariff(product, destination)
+        if tariff and tariff.get("in_scope"):
+            effective_pct = tariff["effective_pct"]
+            tariff_note = tariff.get("note", "")
+        else:
+            effective_pct = 0.0
+            tariff_note = "该产品无税率数据且未传估算税率，关税暂按 0（明显偏低，需重算）"
     duty = total_value * effective_pct / 100.0
 
     mpf = max(MPF_MIN, min(MPF_MAX, total_value * MPF_RATE))
@@ -84,5 +92,5 @@ def estimate_landed_cost(destination: str, product: str, unit_value_usd: float,
         "total_landed_usd": round(total_landed, 2),
         "unit_landed_usd": round(total_landed / qty, 2) if qty else None,
         "risk_note": "风险备用金为估算系数(试销5%/大批2%)，覆盖退运/召回。",
-        "estimate_warning": "物流/杂项为估算值；关税为 SQLite 实时查询的分层税率，最终以海关实时税率为准。",
+        "estimate_warning": "物流/杂项为估算值；关税最终以海关实时税率为准。",
     }

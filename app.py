@@ -1,13 +1,16 @@
-"""Streamlit 前端：评委交互窗口 + 流式输出 + 推理过程可视化。"""
+"""Streamlit 前端：评委交互窗口 + 工作区（历史会话）+ 流式输出 + 推理过程可视化。"""
+import html
 import json
 import os
 
 import streamlit as st
 
+import chat_store
 from agent import stream_agent
 from providers import PROVIDERS
+import vision
 
-st.set_page_config(page_title="跨境出海合规&成本测算 Agent", page_icon="🚢", layout="wide")
+st.set_page_config(page_title="帆朵 · 跨境出海助手", page_icon="🚢", layout="wide")
 
 # —— 可选访问密码：Streamlit Cloud Secrets 或本地 .env 配 APP_PASSWORD ——
 PASSWORD = ""
@@ -19,7 +22,7 @@ if not PASSWORD:
     PASSWORD = os.getenv("APP_PASSWORD", "")
 
 if PASSWORD and not st.session_state.get("authed"):
-    st.title("🔐 跨境出海合规 & 成本测算 Agent")
+    st.title("🔐 帆朵 · 跨境出海助手")
     with st.form("login"):
         pwd = st.text_input("访问密码", type="password")
         if st.form_submit_button("进入"):
@@ -30,15 +33,14 @@ if PASSWORD and not st.session_state.get("authed"):
                 st.error("密码错误")
     st.stop()
 
-st.title("🚢 跨境出海合规 & 成本测算 Agent")
-st.caption("当前案例：美国 · 儿童声光电动早教玩具（数据为整理资料，正式版接官方法规/税率）")
-
 if not any(p["api_key"] for p in PROVIDERS):
     st.error("⚠️ 尚未配置任何 LLM API Key。请在 Streamlit Cloud 的 Secrets 配置 DEEPSEEK_API_KEY。")
     st.stop()
 
-if "history" not in st.session_state:
-    st.session_state.history = []
+# —— 会话初始化：默认载入最近一次会话 ——
+if "current_id" not in st.session_state:
+    convs = chat_store.list_conversations()
+    st.session_state.current_id = convs[0]["id"] if convs else None
 
 EXAMPLES = [
     "500件早教玩具(单价15美元,含锂电池)卖到美国，算合规与到岸成本",
@@ -49,8 +51,8 @@ EXAMPLES = [
 
 
 def copy_button(text: str):
-    """复制按钮：json 安全转义后写进 JS（HTTPS 下 navigator.clipboard 可用）。"""
-    payload = json.dumps(text)
+    """复制按钮：json 序列化 + HTML 实体转义，避免引号/尖括号破坏 HTML 属性。"""
+    payload = html.escape(json.dumps(text, ensure_ascii=False), quote=True)
     st.markdown(
         f'<button onclick="navigator.clipboard.writeText({payload})" '
         f'style="font-size:0.85rem;padding:2px 12px;border:1px solid #888;border-radius:6px;'
@@ -59,37 +61,87 @@ def copy_button(text: str):
     )
 
 
-# —— 渲染历史 ——
-for m in st.session_state.history:
+# —— 侧边栏：工作区（历史会话） ——
+with st.sidebar:
+    st.header("💬 工作区")
+    if st.button("➕ 新建会话", width="stretch"):
+        st.session_state.current_id = None
+        st.rerun()
+
+    st.divider()
+    convs = chat_store.list_conversations()
+    if convs:
+        st.caption(f"共 {len(convs)} 个会话")
+        for c in convs:
+            active = c["id"] == st.session_state.current_id
+            label = ("▶ " if active else "") + c["title"]
+            if st.button(label, key=f"c_{c['id']}", width="stretch"):
+                st.session_state.current_id = c["id"]
+                st.rerun()
+    else:
+        st.caption("暂无历史会话，发送第一条消息后会自动保存到这里")
+
+# —— 主区域 ——
+st.title("🚢 帆朵 · 跨境出海助手")
+st.caption("合规成本测算 + 外贸客服 · 当前数据范围：美国 · 儿童声光电动早教玩具")
+
+messages = chat_store.get_conversation(st.session_state.current_id) if st.session_state.current_id else []
+
+for m in messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# —— 工具条：清空对话 + 记忆指示 ——
-c_clear, c_info = st.columns([1, 3])
-with c_clear:
-    if st.button("🗑️ 清空对话"):
-        st.session_state.history = []
-        st.rerun()
-with c_info:
-    st.caption(f"💬 已对话 {len(st.session_state.history) // 2} 轮（超长自动裁剪上下文）")
-
-# —— 预设示例（仅无历史时显示）——
+# —— 预设示例（仅空会话时显示） ——
 clicked = None
-if not st.session_state.history:
+if not messages:
     st.markdown("**💡 试试这些：**")
     cols = st.columns(len(EXAMPLES))
     for i, ex in enumerate(EXAMPLES):
         if cols[i].button(ex, key=f"ex{i}"):
             clicked = ex
 
-user_input = st.chat_input("输入你的问题，例如：我想把 500 个充电宝卖到美国…")
+msg = None
+user_image_bytes = None
 
-msg = user_input or clicked
+# —— 聊天输入：文字 + 图片（图片直接贴在输入框里）——
+user_input = st.chat_input("输入问题，或直接上传产品图片…", accept_file=True)
+if user_input is not None:
+    d = user_input.to_dict()
+    text = d.get("text", "")
+    files = d.get("files", [])
+    if files:
+        f = files[0]
+        user_image_bytes = f.getvalue()
+        mime = f.type or "image/jpeg"
+        with st.spinner("🔍 正在识别产品…"):
+            r = vision.identify_product(user_image_bytes, mime)
+        if "error" in r:
+            st.error(r["error"])
+        else:
+            desc = r["description"]
+            if text:
+                msg = f"我上传了一张产品图片，图片识别结果：\n{desc}\n\n我的问题：{text}"
+            else:
+                msg = (f"我上传了一张产品图片，图片识别结果：\n{desc}\n\n"
+                       "请基于此帮我分析该产品出口美国的合规要求与关税成本。")
+    elif text:
+        msg = text
+
+if msg is None and clicked:
+    msg = clicked
+
 if msg:
-    prior = [{"role": m["role"], "content": m["content"]} for m in st.session_state.history]
-    st.session_state.history.append({"role": "user", "content": msg})
+    # 新会话 → 先用首条消息做标题建会话
+    if st.session_state.current_id is None:
+        title = msg[:18] + ("…" if len(msg) > 18 else "")
+        st.session_state.current_id = chat_store.create_conversation(title)
+    cid = st.session_state.current_id
+    prior = chat_store.get_conversation(cid)  # 本次之前的历史
+    chat_store.add_message(cid, "user", msg)
 
     with st.chat_message("user"):
+        if user_image_bytes is not None:
+            st.image(user_image_bytes, caption="上传的产品图片")
         st.markdown(msg)
 
     with st.chat_message("assistant"):
@@ -100,40 +152,52 @@ if msg:
         trace = []
         provider = "?"
         usage = None
+        error_msg = None
 
-        for ev in stream_agent(msg, prior):
-            if ev["type"] == "tool":
-                trace.append(ev)
-                status.markdown("🔍 推理中：" + " → ".join(f"`{t['tool']}`" for t in trace))
-            elif ev["type"] == "text":
-                full.append(ev["text"])
-                answer_ph.markdown("".join(full))
-            elif ev["type"] == "done":
-                provider = ev.get("provider", "?")
-                usage = ev.get("usage")
+        try:
+            for ev in stream_agent(msg, prior):
+                if ev["type"] == "tool":
+                    trace.append(ev)
+                    status.markdown("🔍 推理中：" + " → ".join(f"`{t['tool']}`" for t in trace))
+                elif ev["type"] == "text":
+                    full.append(ev["text"])
+                    answer_ph.markdown("".join(full))
+                elif ev["type"] == "done":
+                    provider = ev.get("provider", "?")
+                    usage = ev.get("usage")
+        except Exception as e:  # noqa: BLE001
+            error_msg = str(e)
 
         status.empty()
-        final = "".join(full)
-        answer_ph.markdown(final)
+        if error_msg:
+            final = "连接模型失败，请稍后重试。"
+            answer_ph.error("😥 连接模型失败（可能是网络波动），请稍后重试。")
+            st.caption("网络不稳定时可多点几次重试；云端部署版会更稳定。")
+        else:
+            final = "".join(full)
+            answer_ph.markdown(final)
 
-        meta = f"🤖 模型：{provider}"
-        if usage and usage.get("total"):
-            meta += f" · 本次约 {usage['total']} token"
-        st.caption(meta)
+        if not error_msg:
+            meta = f"🤖 模型：{provider}"
+            if usage and usage.get("total"):
+                meta += f" · 本次约 {usage['total']} token"
+            st.caption(meta)
 
-        c_copy, c_dl = st.columns(2)
-        with c_copy:
-            copy_button(final)
-        with c_dl:
-            st.download_button(
-                "⬇️ 导出报告 (.md)", data=final, file_name="chuhai_report.md",
-                mime="text/markdown",
-            )
+            c_copy, c_dl = st.columns(2)
+            with c_copy:
+                copy_button(final)
+            with c_dl:
+                st.download_button(
+                    "⬇️ 导出报告 (.md)", data=final, file_name="chuhai_report.md",
+                    mime="text/markdown",
+                )
 
-        if trace:
-            with st.expander(f"🔍 推理过程（{len(trace)} 步）"):
-                for t in trace:
-                    st.markdown(f"**步骤 {t['step']}** · 模型 `{t['provider']}` · 工具 `{t['tool']}`")
-                    st.json({"参数": t["args"], "结果": t["result"]})
+            if trace:
+                with st.expander(f"🔍 推理过程（{len(trace)} 步）"):
+                    for t in trace:
+                        st.markdown(f"**步骤 {t['step']}** · 模型 `{t['provider']}` · 工具 `{t['tool']}`")
+                        st.code(json.dumps({"参数": t["args"], "结果": t["result"]},
+                                           ensure_ascii=False, indent=2), language="json")
 
-    st.session_state.history.append({"role": "assistant", "content": final})
+    chat_store.add_message(cid, "assistant", final)
+    st.rerun()

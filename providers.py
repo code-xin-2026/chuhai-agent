@@ -8,6 +8,7 @@
 某个供应商额度用尽(429)/报错/超时 → 自动切下一个，评委无感知。
 """
 import os
+import time
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -58,7 +59,7 @@ def _make_client(p):
     return OpenAI(base_url=p["base_url"], api_key=p["api_key"], timeout=120.0)
 
 
-def chat_completion(messages, tools=None, temperature=0.3, retries_per_provider=1):
+def chat_completion(messages, tools=None, temperature=0.3, retries_per_provider=2):
     """依次尝试每个供应商，返回第一个成功的响应；全部失败则抛异常。"""
     errors = []
     for p in PROVIDERS:
@@ -76,6 +77,8 @@ def chat_completion(messages, tools=None, temperature=0.3, retries_per_provider=
                 return resp
             except Exception as e:  # noqa: BLE001
                 errors.append(f"{p['name']}(第{attempt + 1}次): {type(e).__name__}: {e}")
+                if attempt < retries_per_provider:
+                    time.sleep(1.5 * (attempt + 1))  # 退避重试，抗网络抖动
     raise RuntimeError("所有供应商均调用失败：\n" + "\n".join(errors))
 
 
