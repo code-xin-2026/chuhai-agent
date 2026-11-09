@@ -6,6 +6,7 @@ import os
 import streamlit as st
 
 import chat_store
+import client
 from agent import stream_agent
 from providers import PROVIDERS
 import stt
@@ -40,9 +41,12 @@ def chat_page():
         st.error("⚠️ 尚未配置任何 LLM API Key。请在 Streamlit Cloud 的 Secrets 配置 DEEPSEEK_API_KEY。")
         st.stop()
 
+    # —— 访问者身份：每个浏览器一个唯一 ID（cookie 持久化），隔离各自历史 ——
+    client_id = client.get_client_id()
+
     # —— 会话初始化：默认载入最近一次会话 ——
     if "current_id" not in st.session_state:
-        convs = chat_store.list_conversations()
+        convs = chat_store.list_conversations(client_id)
         st.session_state.current_id = convs[0]["id"] if convs else None
 
     EXAMPLES = [
@@ -80,7 +84,7 @@ def chat_page():
             st.rerun()
 
         st.divider()
-        convs = chat_store.list_conversations()
+        convs = chat_store.list_conversations(client_id)
         if convs:
             st.caption(f"共 {len(convs)} 个会话")
             for c in convs:
@@ -96,7 +100,7 @@ def chat_page():
     st.title("🚢 帆朵 · 跨境出海助手")
     st.caption("合规成本测算 + 外贸客服 + 订单自动处理 · 覆盖：美国 / 印度 / 俄罗斯")
 
-    messages = chat_store.get_conversation(st.session_state.current_id) if st.session_state.current_id else []
+    messages = chat_store.get_conversation(st.session_state.current_id, client_id) if st.session_state.current_id else []
 
     for m in messages:
         with st.chat_message(m["role"]):
@@ -160,10 +164,10 @@ def chat_page():
         # 新会话 → 先用首条消息做标题建会话
         if st.session_state.current_id is None:
             title = msg[:18] + ("…" if len(msg) > 18 else "")
-            st.session_state.current_id = chat_store.create_conversation(title)
+            st.session_state.current_id = chat_store.create_conversation(title, client_id)
             chat_store.add_message(st.session_state.current_id, "assistant", WELCOME_MESSAGE)
         cid = st.session_state.current_id
-        prior = chat_store.get_conversation(cid)  # 本次之前的历史
+        prior = chat_store.get_conversation(cid, client_id)  # 本次之前的历史
         chat_store.add_message(cid, "user", msg)
 
         with st.chat_message("user"):

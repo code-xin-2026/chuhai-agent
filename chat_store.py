@@ -1,4 +1,4 @@
-"""会话持久化存储（SQLite）：工作区保留历史对话。"""
+"""会话持久化存储（SQLite）：工作区保留历史对话，按访问者(client_id)隔离。"""
 import os
 import sqlite3
 import uuid
@@ -11,10 +11,16 @@ def _conn():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""CREATE TABLE IF NOT EXISTS conversations (
-        id TEXT PRIMARY KEY, title TEXT, created_at TEXT, updated_at TEXT)""")
+        id TEXT PRIMARY KEY, title TEXT, created_at TEXT, updated_at TEXT,
+        client_id TEXT DEFAULT '')""")
     conn.execute("""CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         conversation_id TEXT, role TEXT, content TEXT, seq INTEGER)""")
+    # 迁移：旧库(无 client_id 列)补列；旧数据 client_id=''，对新访问者自动不可见
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()]
+    if "client_id" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN client_id TEXT DEFAULT ''")
+        conn.commit()
     return conn
 
 
@@ -22,29 +28,40 @@ def _now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def list_conversations():
-    """按最近更新倒序返回会话列表。"""
+def list_conversations(client_id):
+    """按最近更新倒序返回「该访问者」的会话列表。"""
     conn = _conn()
     rows = conn.execute(
-        "SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC"
+        "SELECT id, title, updated_at FROM conversations WHERE client_id=? ORDER BY updated_at DESC",
+        (client_id,),
     ).fetchall()
     conn.close()
     return [{"id": r[0], "title": r[1], "updated_at": r[2]} for r in rows]
 
 
-def create_conversation(title="新会话"):
+def create_conversation(title="新会话", client_id=""):
     cid = uuid.uuid4().hex[:12]
     now = _now()
     conn = _conn()
-    conn.execute("INSERT INTO conversations VALUES (?,?,?,?)", (cid, title, now, now))
+    conn.execute(
+        "INSERT INTO conversations (id, title, created_at, updated_at, client_id) VALUES (?,?,?,?,?)",
+        (cid, title, now, now, client_id),
+    )
     conn.commit()
     conn.close()
     return cid
 
 
-def get_conversation(cid):
-    """返回 [{"role","content"}, ...]，按 seq 排序。"""
+def get_conversation(cid, client_id=None):
+    """返回 [{"role","content"}, ...]，按 seq 排序。带 client_id 时校验归属，防止串读他人会话。"""
     conn = _conn()
+    if client_id is not None:
+        owner = conn.execute(
+            "SELECT client_id FROM conversations WHERE id=?", (cid,)
+        ).fetchone()
+        if owner is None or owner[0] != client_id:
+            conn.close()
+            return []
     rows = conn.execute(
         "SELECT role, content FROM messages WHERE conversation_id=? ORDER BY seq", (cid,)
     ).fetchall()
