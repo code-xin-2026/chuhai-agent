@@ -8,6 +8,7 @@ import streamlit as st
 import chat_store
 from agent import stream_agent
 from providers import PROVIDERS
+import stt
 import vision
 
 st.set_page_config(page_title="帆朵 · 跨境出海助手", page_icon="🚢", layout="wide")
@@ -114,14 +115,27 @@ def chat_page():
 
     msg = None
     user_image_bytes = None
+    from_voice = False
 
-    # —— 聊天输入：文字 + 图片（图片直接贴在输入框里）——
-    user_input = st.chat_input("输入问题，或直接上传产品图片…", accept_file=True)
+    # —— 聊天输入：文字 + 图片 + 语音（都内置在输入框里）——
+    user_input = st.chat_input("输入问题，或直接上传产品图片 / 录音…",
+                               accept_file=True, accept_audio=True)
     if user_input is not None:
         d = user_input.to_dict()
         text = d.get("text", "")
         files = d.get("files", [])
-        if files:
+        audio = d.get("audio")          # UploadedFile | None（accept_audio=True 时）
+        if audio is not None:
+            # 语音录音 → 转文字
+            with st.spinner("🎤 正在转写语音…"):
+                r = stt.transcribe(audio.getvalue(), audio.type or "audio/wav")
+            if "error" in r:
+                st.error(r["error"])
+            else:
+                voice_text = r["text"]
+                msg = f"{voice_text} {text}".strip() if text else voice_text
+                from_voice = True
+        elif files:
             f = files[0]
             user_image_bytes = f.getvalue()
             mime = f.type or "image/jpeg"
@@ -156,6 +170,8 @@ def chat_page():
             if user_image_bytes is not None:
                 st.image(user_image_bytes, caption="上传的产品图片")
             st.markdown(msg)
+            if from_voice:
+                st.caption("🎤 由语音转写")
 
         with st.chat_message("assistant"):
             status = st.empty()

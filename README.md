@@ -17,6 +17,8 @@
 app.py               Streamlit 前端（评委交互 + 推理过程可视化）
 agent.py             ReAct 智能体循环（function calling + 兜底）
 providers.py         LLM 供应商配置 + 自动 failover（JoyCode/DeepSeek/tokenrhythm）
+vision.py            图片识别（智谱 GLM-4V-Flash → 文本描述）
+stt.py               语音识别（浏览器录音 → 文字，阿里云百炼 Qwen3-ASR）
 tools/
   compliance.py      认证准入查询（CPC/FCC/UL/UN38.3 + 风险字段）
   cost.py            到岸成本测算（关税/MPF/HMF/物流/认证摊薄/风险备用金）
@@ -44,9 +46,19 @@ uv run streamlit run app.py
    ```toml
    DEEPSEEK_API_KEY = "sk-..."
    DEEPSEEK_MODEL = "deepseek-chat"
+   ASR_API_KEY = "sk-..."             # 语音输入用（阿里云百炼），不配则语音按钮报错提示
    APP_PASSWORD = "给评委的访问密码"   # 可选，配了就多一道密码门
    ```
 4. 得到公网链接：`https://<app-name>.streamlit.app`，提交到比赛系统即可。
+
+## 语音输入（语音转文字提问）
+
+聊天框上方有个 🎤 语音提问按钮：点一下开始录音，再点一下结束，自动转成文字并发出。
+
+- 识别走**阿里云百炼 Qwen3-ASR**（国内可用、中文识别好、有免费额度）。
+- 只需配一个 `ASR_API_KEY`（本地填 `.env`，云端填 Streamlit Secrets），其余默认即可。
+- 获取 Key：打开 https://bailian.console.aliyun.com → 开通「百炼」服务 → 右上角 API-KEY → 创建。
+- 想换别的 ASR（硅基流动 SenseVoice、new-api whisper-1 等）：改 `ASR_MODEL` 即可，非 qwen 模型自动走标准 `/audio/transcriptions` 接口，无需改代码。
 
 ## 状态
 
@@ -54,5 +66,6 @@ uv run streamlit run app.py
 - [x] 前端交互界面 + 推理过程可视化
 - [x] 真实 HS 分层税率库（SQLite + 来源 + 更新时间）
 - [x] 合规 + 成本 + 风险量化工具
+- [x] 语音输入（录音 → 文字 → 对话，阿里云百炼 Qwen3-ASR）
 - [ ] 部署公网链接
 - [ ] PPT + 答辩视频
