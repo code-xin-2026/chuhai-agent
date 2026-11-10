@@ -21,10 +21,13 @@ def _conn():
     if "client_id" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN client_id TEXT DEFAULT ''")
         conn.commit()
-    # 迁移：消息表补 image 列（上传图片的本地路径，供历史重新显示）
+    # 迁移：消息表补 image 列（上传图片的本地路径）+ meta 列（推理过程 trace JSON）
     mcols = [r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()]
     if "image" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN image TEXT")
+        conn.commit()
+    if "meta" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN meta TEXT DEFAULT ''")
         conn.commit()
     return conn
 
@@ -68,19 +71,19 @@ def get_conversation(cid, client_id=None):
             conn.close()
             return []
     rows = conn.execute(
-        "SELECT role, content, image FROM messages WHERE conversation_id=? ORDER BY seq", (cid,)
+        "SELECT role, content, image, meta FROM messages WHERE conversation_id=? ORDER BY seq", (cid,)
     ).fetchall()
     conn.close()
-    return [{"role": r[0], "content": r[1], "image": r[2]} for r in rows]
+    return [{"role": r[0], "content": r[1], "image": r[2], "meta": r[3] or ""} for r in rows]
 
 
-def add_message(cid, role, content, image=None):
+def add_message(cid, role, content, image=None, meta=None):
     conn = _conn()
     seq = conn.execute(
         "SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE conversation_id=?", (cid,)
     ).fetchone()[0]
-    cur = conn.execute("INSERT INTO messages (conversation_id, role, content, seq, image) VALUES (?,?,?,?,?)",
-                       (cid, role, content, seq, image))
+    cur = conn.execute("INSERT INTO messages (conversation_id, role, content, seq, image, meta) VALUES (?,?,?,?,?,?)",
+                       (cid, role, content, seq, image, meta or ""))
     conn.execute("UPDATE conversations SET updated_at=? WHERE id=?", (_now(), cid))
     conn.commit()
     mid = cur.lastrowid
@@ -88,10 +91,13 @@ def add_message(cid, role, content, image=None):
     return mid
 
 
-def update_message(mid, content):
+def update_message(mid, content, meta=None):
     """流式生成过程中实时更新某条消息内容（切换会话中断时，已生成部分仍保留）。"""
     conn = _conn()
-    conn.execute("UPDATE messages SET content=? WHERE id=?", (content, mid))
+    if meta is not None:
+        conn.execute("UPDATE messages SET content=?, meta=? WHERE id=?", (content, meta, mid))
+    else:
+        conn.execute("UPDATE messages SET content=? WHERE id=?", (content, mid))
     conn.commit()
     conn.close()
 

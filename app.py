@@ -115,6 +115,12 @@ def chat_page():
 
     messages = chat_store.get_conversation(st.session_state.current_id, client_id) if st.session_state.current_id else []
 
+    def _parse_trace(meta_str):
+        try:
+            return (json.loads(meta_str or "") or {}).get("trace") or []
+        except Exception:
+            return []
+
     for m in messages:
         if not m.get("content", "").strip() and not m.get("image"):
             continue  # 跳过占位/空消息
@@ -123,6 +129,14 @@ def chat_page():
                 st.image(m["image"], caption="上传的产品图片")
             if m.get("content", "").strip():
                 st.markdown(m["content"])
+            if m["role"] == "assistant":
+                hist_trace = _parse_trace(m.get("meta"))
+                if hist_trace:
+                    with st.expander(f"🔍 推理过程（{len(hist_trace)} 步）"):
+                        for t in hist_trace:
+                            st.markdown(f"**步骤 {t.get('step', '?')}** · 模型 `{t.get('provider', '?')}` · 工具 `{t.get('tool', '?')}`")
+                            st.code(json.dumps({"参数": t.get("args"), "结果": t.get("result")},
+                                               ensure_ascii=False, indent=2), language="json")
 
     # —— 预设示例（仅空会话时显示） ——
     clicked = None
@@ -250,7 +264,8 @@ def chat_page():
             else:
                 final = "".join(full)
                 answer_ph.markdown(final)
-            chat_store.update_message(assistant_mid, final)  # 覆盖占位/partial，落最终答案
+            trace_meta = json.dumps({"trace": trace}, ensure_ascii=False) if trace else ""
+            chat_store.update_message(assistant_mid, final, meta=trace_meta)  # 覆盖占位/partial，落最终答案 + 推理过程
 
             if not error_msg:
                 meta = f"🤖 模型：{provider}"
