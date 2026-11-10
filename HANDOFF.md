@@ -96,6 +96,26 @@ Streamlit（前端，纯 Python，一个人可维护）
 
 5. **本地内存紧张**：机器 8GB 内存，跑 streamlit 本地调试时别同时开太多东西。
 
+6. **识图「没反应 / 图片消失」两个根因（2026-11-10 已修，别改回）**：
+   - 上传的图片原来只 `st.image` 即时显示、没写进库，`st.rerun()` 后历史只渲染文字 → 图片「消失」。现在图片先 `_save_upload()` 落盘到 `data/uploads/`，`add_message(..., image=路径)` 存库，历史循环里按 `m["image"]` 重显。
+   - 识图失败（GLM key 没配 / 网络超时）时原来 `msg` 一直是 None，整条输入被静默丢弃 → 「没反应」。现在失败时按文字继续（提示警告），不再丢输入。
+   - **部署版必配 `GLM_API_KEY`**：README 的 Cloud Secrets 原来漏了它，云端没这个 key 时 `vision.py` 直接返回「未配置」，识图等于废掉。已补进 README secrets 清单。
+
+7. **识图「乱编 HS 编码 + 图太大」根因与修法（2026-11-10 已修，别改回）**：
+   - **不猜 HS**：`vision.py` 的 prompt 原来让 GLM 猜「可能对应的 HS 编码大类」，GLM 没有真实 HS 知识，把保温杯编成 6913/9018、塑料瓶编成 39206500。现在 prompt 只让它**描述产品**（类型/材质/电池/用途/特征），HS 归类交给后端 `tools/tariff_db.py`（真实关键词→HS：保温杯→7323.93.00）和 `tools/compliance.py`。**别再往 vision 的 prompt 里加「猜 HS」**。
+   - **压缩**：`vision.compress_image()` 把上传图转 RGB、缩到最长边 ≤1024、JPEG(q82)，大图/PNG/透明底/webp 统一压成小 JPEG 再发 GLM，解决「图太大」超限/识别跑偏；`_save_upload` 存的是压缩图（历史显示也轻）。
+   - **类型校验**：`accept_file` 不限类型，现在非 `image/*` 文件会提示「只支持图片」，不再被当图片发给 GLM。
+   - `requirements.txt` 补了 `pillow`（压缩依赖，部署版别漏）。
+
+8. **流式回答的两个体验坑（2026-11-10 已修，别改回）**：
+   - **推理「跳步」**：`chat_completion` 非流式，模型第一轮就可能一次返回 3-4 个 tool_calls，本地工具毫秒级跑完 → 前端只看到「思考中」突然全跑完。现在每个 tool 事件后 `time.sleep(0.35)` 让每步推理状态可见（评委要看「多步工具调用」）。
+   - **切换/新建会话中断思考且回答丢失**：Streamlit 交互触发 rerun 会中断流式循环，而回答原来只在**最后**才 `add_message` 落库，中断就整段丢。现在改为「先 `add_message(cid,"assistant","")` 落占位拿 id → 每段 text 边生成边 `update_message(id, cur)` → 结束再 `update_message(id, final)`」，中断后已生成部分已写库，切回来能看到半截而非消失。`chat_store.add_message` 现在返回消息 id，渲染层跳过空 content 消息。
+
+9. **订单成本两个 bug（2026-11-10 已修，别改回）**：
+   - **运输方式映射失效**：`orders/processor.py` 的 `_map_mode` 原来把「空运/海运/陆运」一律归成 `FBA大批量`，导致 `tools/cost.py::_freight_rate` 永远按海运单价(4 USD/kg)算——空运订单(10 USD/kg)被低估 2.5 倍。现在 `_map_mode` 保留空/海/陆，`cost.py` 用 `_is_small_parcel()` 判断小包（改 fba_prep/reserve 两处判断），运费单价正确。
+   - **`estimate_landed_cost` 的 `has_lithium_battery` 默认 True**：模型漏传时会被静默按「含锂电池」加危险品附加费。已改默认 False。
+   - 注意：`_freight_rate` 支持「空运/海运/陆运」三种单价，但 TOOLS schema 里 mode 只有「直邮小包/FBA大批量」两档（主对话用）；订单 CSV 的「物流方式」列填的是「空运/海运/陆运」（订单处理用）。两者语义不同但已通过 `_map_mode`+`_is_small_parcel` 兼容，别再动。
+
 ---
 
 ## 七、本地运行

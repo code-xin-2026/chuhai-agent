@@ -33,9 +33,15 @@ def _freight_rate(mode):
     return FREIGHT_SEA_USD_PER_KG
 
 
+def _is_small_parcel(mode):
+    """小包/直邮/快递/专线类（走空运、无 FBA 预处理、风险系数更高）。"""
+    m = (mode or "").strip()
+    return any(k in m for k in ("小包", "直邮", "快递", "专线", "express", "parcel"))
+
+
 def estimate_landed_cost(destination: str, product: str, unit_value_usd: float,
                          quantity: int, mode: str = "FBA大批量",
-                         has_lithium_battery: bool = True,
+                         has_lithium_battery: bool = False,
                          tariff_rate_pct: float = None):
     """测算到岸成本。tariff_rate_pct 可选：产品不在税率库时由模型估算传入。"""
     qty = int(quantity)
@@ -65,10 +71,10 @@ def estimate_landed_cost(destination: str, product: str, unit_value_usd: float,
     freight_rate = _freight_rate(mode)
     freight = weight_kg * freight_rate
     dangerous_surcharge = weight_kg * DANGEROUS_SURCHARGE_USD_PER_KG if has_lithium_battery else 0.0
-    fba_prep = qty * FBA_PREP_USD_PER_UNIT if mode == "FBA大批量" else 0.0
+    fba_prep = qty * FBA_PREP_USD_PER_UNIT if not _is_small_parcel(mode) else 0.0
 
     cert_total = certification_total_cost_usd(destination, product)
-    reserve_rate = RISK_RESERVE_PCT_SMALL if mode == "直邮小包" else RISK_RESERVE_PCT_LARGE
+    reserve_rate = RISK_RESERVE_PCT_SMALL if _is_small_parcel(mode) else RISK_RESERVE_PCT_LARGE
     risk_reserve = total_value * reserve_rate
 
     extra_costs = duty + mpf + hmf + freight + dangerous_surcharge + fba_prep + cert_total + risk_reserve

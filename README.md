@@ -46,6 +46,7 @@ uv run streamlit run app.py
    ```toml
    DEEPSEEK_API_KEY = "sk-..."
    DEEPSEEK_MODEL = "deepseek-chat"
+   GLM_API_KEY = "..."                # 图片识别用（智谱 glm-4v-flash），不配则「上传图片识图」无反应
    ASR_API_KEY = "sk-..."             # 语音输入用（阿里云百炼），不配则语音按钮报错提示
    APP_PASSWORD = "给评委的访问密码"   # 可选，配了就多一道密码门
    ```

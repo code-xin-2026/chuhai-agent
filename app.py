@@ -2,6 +2,8 @@
 import html
 import json
 import os
+import time
+import uuid
 
 import streamlit as st
 
@@ -13,6 +15,17 @@ import stt
 import vision
 
 st.set_page_config(page_title="帆朵 · 跨境出海助手", page_icon="🚢", layout="wide")
+
+
+def _save_upload(image_bytes, mime):
+    """上传图片落盘，返回本地路径（用于历史里重新显示图片，否则 rerun 后图片会消失）。"""
+    ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}.get(mime, ".png")
+    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "uploads")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, uuid.uuid4().hex[:12] + ext)
+    with open(p, "wb") as fh:
+        fh.write(image_bytes)
+    return p
 
 
 def chat_page():
@@ -103,8 +116,13 @@ def chat_page():
     messages = chat_store.get_conversation(st.session_state.current_id, client_id) if st.session_state.current_id else []
 
     for m in messages:
+        if not m.get("content", "").strip() and not m.get("image"):
+            continue  # 跳过占位/空消息
         with st.chat_message(m["role"]):
-            st.markdown(m["content"])
+            if m.get("image") and os.path.exists(m["image"]):
+                st.image(m["image"], caption="上传的产品图片")
+            if m.get("content", "").strip():
+                st.markdown(m["content"])
 
     # —— 预设示例（仅空会话时显示） ——
     clicked = None
@@ -119,6 +137,7 @@ def chat_page():
 
     msg = None
     user_image_bytes = None
+    user_image_path = None
     from_voice = False
 
     # —— 聊天输入：文字 + 图片 + 语音（都内置在输入框里）——
@@ -141,19 +160,30 @@ def chat_page():
                 from_voice = True
         elif files:
             f = files[0]
-            user_image_bytes = f.getvalue()
-            mime = f.type or "image/jpeg"
-            with st.spinner("🔍 正在识别产品…"):
-                r = vision.identify_product(user_image_bytes, mime)
-            if "error" in r:
-                st.error(r["error"])
+            mime = (f.type or "").lower()
+            if mime and not mime.startswith("image/"):
+                # 非图片文件：提示，只保留文字
+                st.warning("⚠️ 只支持上传图片（jpg/png/webp）。请改传图片，或直接用文字提问。")
+                msg = text
             else:
-                desc = r["description"]
-                if text:
-                    msg = f"我上传了一张产品图片，图片识别结果：\n{desc}\n\n我的问题：{text}"
+                try:
+                    user_image_bytes = vision.compress_image(f.getvalue())
+                except Exception:
+                    user_image_bytes = f.getvalue()  # 压缩失败就用原图兜底
+                user_image_path = _save_upload(user_image_bytes, "image/jpeg")  # 落盘压缩图：历史不丢且更轻
+                with st.spinner("🔍 正在识别产品…"):
+                    r = vision.identify_product(user_image_bytes, "image/jpeg")
+                if "error" in r:
+                    st.warning(f"⚠️ 图片自动识别失败，已按文字继续处理（{r['error']}）")
+                    msg = text if text else ("我上传了一张产品图片，但自动识别暂不可用，"
+                                             "请用文字描述一下图片里的产品，我帮你分析出口合规与关税成本。")
                 else:
-                    msg = (f"我上传了一张产品图片，图片识别结果：\n{desc}\n\n"
-                           "请基于此帮我分析该产品出口美国的合规要求与关税成本。")
+                    desc = r["description"]
+                    if text:
+                        msg = f"我上传了一张产品图片，图片识别结果：\n{desc}\n\n我的问题：{text}"
+                    else:
+                        msg = (f"我上传了一张产品图片，图片识别结果：\n{desc}\n\n"
+                               "请基于此帮我分析该产品出口美国的合规要求与关税成本。")
         elif text:
             msg = text
 
@@ -168,7 +198,7 @@ def chat_page():
             chat_store.add_message(st.session_state.current_id, "assistant", WELCOME_MESSAGE)
         cid = st.session_state.current_id
         prior = chat_store.get_conversation(cid, client_id)  # 本次之前的历史
-        chat_store.add_message(cid, "user", msg)
+        chat_store.add_message(cid, "user", msg, image=user_image_path)
 
         with st.chat_message("user"):
             if user_image_bytes is not None:
@@ -186,15 +216,26 @@ def chat_page():
             provider = "?"
             usage = None
             error_msg = None
+            # 先落一条占位 assistant 消息，流式过程中实时更新——切换/新建会话触发 rerun
+            # 中断时，已生成的部分已经写库，不会整段消失。
+            assistant_mid = chat_store.add_message(cid, "assistant", "")
 
+            last_flush = 0.0
             try:
                 for ev in stream_agent(msg, prior):
                     if ev["type"] == "tool":
                         trace.append(ev)
                         status.markdown("🔍 推理中：" + " → ".join(f"`{t['tool']}`" for t in trace))
+                        time.sleep(0.35)  # 本地工具毫秒级跑完，加停顿让每一步推理状态可见，避免"跳步"
                     elif ev["type"] == "text":
                         full.append(ev["text"])
-                        answer_ph.markdown("".join(full))
+                        now = time.time()
+                        # 节流渲染：攒一小段(≥100ms)再刷新，避免逐 token 蹦字导致的卡顿
+                        if now - last_flush >= 0.1:
+                            cur = "".join(full)
+                            answer_ph.markdown(cur)
+                            chat_store.update_message(assistant_mid, cur)  # 实时落库
+                            last_flush = now
                     elif ev["type"] == "done":
                         provider = ev.get("provider", "?")
                         usage = ev.get("usage")
@@ -209,6 +250,7 @@ def chat_page():
             else:
                 final = "".join(full)
                 answer_ph.markdown(final)
+            chat_store.update_message(assistant_mid, final)  # 覆盖占位/partial，落最终答案
 
             if not error_msg:
                 meta = f"🤖 模型：{provider}"
@@ -232,7 +274,6 @@ def chat_page():
                             st.code(json.dumps({"参数": t["args"], "结果": t["result"]},
                                                ensure_ascii=False, indent=2), language="json")
 
-        chat_store.add_message(cid, "assistant", final)
         st.rerun()
 
 

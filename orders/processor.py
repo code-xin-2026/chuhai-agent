@@ -22,6 +22,13 @@ def _map_mode(mode):
     m = (mode or "").strip()
     if any(k in m for k in ("小包", "直邮", "快递", "专线", "express", "parcel", "小包裹")):
         return "直邮小包"
+    # 保留运输方式，让成本测算按 空/海/陆 选运费单价（否则「空运」会被按「海运」算）
+    if any(k in m for k in ("空运", "air", "空派")):
+        return "空运"
+    if any(k in m for k in ("陆运", "land", "公路", "铁路", "陆派")):
+        return "陆运"
+    if any(k in m for k in ("海运", "sea", "海派", "ocean", "船运")):
+        return "海运"
     return "FBA大批量"
 
 
