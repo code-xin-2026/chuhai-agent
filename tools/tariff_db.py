@@ -5,7 +5,7 @@ import sqlite3
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "tariff.db")
 
 _COLS = ["hs_code", "country", "description", "mfn_pct", "china_surcharge_pct",
-         "effective_pct", "source", "note", "updated_at"]
+         "effective_pct", "source", "source_url", "note", "updated_at"]
 
 # 关键词 → HS（产品名命中任一子串即映射；顺序即优先级：玩具类排最前，安全优先）
 _KEYWORD_HS = [
@@ -85,6 +85,7 @@ def query_tariff(product: str, destination: str = "美国"):
         },
         "effective_pct": t["effective_pct"],
         "source": t["source"],
+        "source_url": t.get("source_url") or "",
         "note": t["note"],
         "updated_at": t["updated_at"],
     }

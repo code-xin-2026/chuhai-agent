@@ -295,5 +295,6 @@ def chat_page():
 pg = st.navigation([
     st.Page(chat_page, title="主对话", icon="💬", default=True),
     st.Page("pages/1_📦_订单处理.py", title="订单处理", icon="📦"),
+    st.Page("pages/2_🩺_风险体检.py", title="风险体检", icon="🩺"),
 ])
 pg.run()
