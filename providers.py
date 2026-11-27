@@ -15,6 +15,12 @@ from openai import OpenAI
 
 load_dotenv()
 
+# 强制直连：dev-sidecar 等工具会把 Windows 系统代理设为 127.0.0.1:31181，
+# 若其进程退出则变成「幽灵代理」导致 LLM API 请求全部 connection refused。
+# app 只访问 LLM/视觉/语音 API，都应直连，不走系统代理。
+os.environ["NO_PROXY"] = "*"
+os.environ["no_proxy"] = "*"
+
 try:
     import streamlit as st
 except Exception:  # noqa: BLE001

@@ -2,6 +2,8 @@
 from skills_loader import read_reference
 from tools.compliance import check_compliance
 from tools.cost import estimate_landed_cost
+from tools.dangerous_goods import check_dangerous_goods
+from tools.listing import generate_listing
 from tools.tariff_db import query_tariff
 
 TOOLS = [
@@ -70,6 +72,37 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_dangerous_goods",
+            "description": "危险品运输合规检查：当产品含锂电池/电池时，查 UN38.3、MSDS、UN 编号、IMDG/IATA 运输限制。普通无电池产品不要调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product": {"type": "string", "description": "产品名，如：儿童声光电动早教玩具"},
+                    "has_lithium_battery": {"type": "boolean", "description": "产品是否含锂电池（用户明确说明含锂时填 true）"},
+                },
+                "required": ["product"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_listing",
+            "description": "按产品 + 目的国 + 平台生成当地语言的本地化 Listing（标题/五点/ST 词），并做违禁词自检。仅当用户要求写 Listing/文案/标题时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product": {"type": "string", "description": "产品名，如：蓝牙耳机"},
+                    "destination": {"type": "string", "description": "目的国，如：美国"},
+                    "platform": {"type": "string", "description": "平台，如 Amazon / TikTok Shop / 独立站"},
+                },
+                "required": ["product"],
+            },
+        },
+    },
 ]
 
 _TOOL_IMPL = {
@@ -77,6 +110,8 @@ _TOOL_IMPL = {
     "estimate_landed_cost": estimate_landed_cost,
     "query_tariff": query_tariff,
     "read_skill_reference": read_reference,
+    "check_dangerous_goods": check_dangerous_goods,
+    "generate_listing": generate_listing,
 }
 
 
