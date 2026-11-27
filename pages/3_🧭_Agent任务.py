@@ -4,6 +4,7 @@
 → 产出可下载的结构化报告 + 人工确认闸口。证明「AI 在干活」，而不是一问一答。
 """
 import json
+import os
 import time
 
 import streamlit as st
@@ -11,6 +12,26 @@ import streamlit as st
 from agent import stream_agent
 
 st.set_page_config(page_title="帆朵 · Agent 任务", page_icon="🧭", layout="wide")
+
+# —— 密码门（与主应用一致）——
+PASSWORD = ""
+try:
+    PASSWORD = st.secrets.get("APP_PASSWORD", "")
+except Exception:
+    PASSWORD = ""
+if not PASSWORD:
+    PASSWORD = os.getenv("APP_PASSWORD", "")
+if PASSWORD and not st.session_state.get("authed"):
+    st.title("🔐 帆朵 · Agent 任务")
+    with st.form("login_task"):
+        pwd = st.text_input("访问密码", type="password")
+        if st.form_submit_button("进入"):
+            if pwd == PASSWORD:
+                st.session_state["authed"] = True
+                st.rerun()
+            else:
+                st.error("密码错误")
+    st.stop()
 
 st.title("🧭 Agent 任务")
 st.caption("给一个目标，Agent 自己规划、调用工具、产出报告。你看到的每一步都是它自己决定的，不是写死的流程。")
